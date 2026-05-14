@@ -411,30 +411,47 @@ download_paqet() {
     local filename="paqet-${os_name}-${arch}-${version}.${ext}"
     local url="https://github.com/${PAQET_REPO}/releases/download/${version}/${filename}"
 
-    log_info "Downloading paqet ${version} for ${os_name}/${arch}..."
-
     if ! mkdir -p "$INSTALL_DIR/bin"; then
         log_error "Failed to create directory $INSTALL_DIR/bin"
         return 1
     fi
+
     local tmp_file
     tmp_file=$(mktemp "/tmp/paqet-download-XXXXXXXX.${ext}") || { log_error "Failed to create temp file"; return 1; }
 
-    # Try curl first, fallback to wget
+    # Check for local archive first
+    local local_archive
+    local_archive=$(find "$INSTALL_DIR/bin" -maxdepth 1 -name "paqet-linux-${arch}-*.tar.gz" 2>/dev/null | head -1)
+
     local download_ok=false
-    if curl -sL --max-time 180 --retry 3 --retry-delay 5 --fail -o "$tmp_file" "$url" 2>/dev/null; then
+    if [ -n "$local_archive" ] && [ -f "$local_archive" ]; then
+        log_info "Found local archive: $local_archive. Using it instead of downloading."
+        cp "$local_archive" "$tmp_file"
         download_ok=true
-    elif command -v wget &>/dev/null; then
-        log_info "curl failed, trying wget..."
-        rm -f "$tmp_file"
-        if wget -q --timeout=180 --tries=3 -O "$tmp_file" "$url" 2>/dev/null; then
+    elif [ -n "$PAQET_MIRROR" ]; then
+        log_info "Using mirror for download: $PAQET_MIRROR"
+        if curl -sL --max-time 180 --retry 3 --retry-delay 5 --fail -o "$tmp_file" "$PAQET_MIRROR" 2>/dev/null || \
+           wget -q --timeout=180 --tries=3 -O "$tmp_file" "$PAQET_MIRROR" 2>/dev/null; then
             download_ok=true
+        fi
+    fi
+
+    if [ "$download_ok" = "false" ]; then
+        log_info "Downloading paqet ${version} for ${os_name}/${arch}..."
+        # Try curl first, fallback to wget
+        if curl -sL --max-time 180 --retry 3 --retry-delay 5 --fail -o "$tmp_file" "$url" 2>/dev/null; then
+            download_ok=true
+        elif command -v wget &>/dev/null; then
+            log_info "curl failed, trying wget..."
+            if wget -q --timeout=180 --tries=3 -O "$tmp_file" "$url" 2>/dev/null; then
+                download_ok=true
+            fi
         fi
     fi
 
     if [ "$download_ok" != "true" ]; then
         log_error "Failed to download: $url"
-        log_error "Try manual download: wget '$url' and place binary in $INSTALL_DIR/bin/"
+        log_error "Try manual download: wget '$url' and place the archive in $INSTALL_DIR/bin/"
         rm -f "$tmp_file"
         return 1
     fi
@@ -2569,27 +2586,44 @@ download_paqet() {
     local filename="paqet-${os_name}-${arch}-${version}.${ext}"
     local url="https://github.com/${PAQET_REPO}/releases/download/${version}/${filename}"
 
-    log_info "Downloading paqet ${version} for ${os_name}/${arch}..."
-
     mkdir -p "$INSTALL_DIR/bin" || { log_error "Failed to create directory"; return 1; }
+
     local tmp_file
     tmp_file=$(mktemp "/tmp/paqet-download-XXXXXXXX.${ext}") || { log_error "Failed to create temp file"; return 1; }
 
-    # Try curl first, fallback to wget
+    # Check for local archive first
+    local local_archive
+    local_archive=$(find "$INSTALL_DIR/bin" -maxdepth 1 -name "paqet-linux-${arch}-*.tar.gz" 2>/dev/null | head -1)
+
     local download_ok=false
-    if curl -sL --max-time 180 --retry 3 --retry-delay 5 --fail -o "$tmp_file" "$url" 2>/dev/null; then
+    if [ -n "$local_archive" ] && [ -f "$local_archive" ]; then
+        log_info "Found local archive: $local_archive. Using it instead of downloading."
+        cp "$local_archive" "$tmp_file"
         download_ok=true
-    elif command -v wget &>/dev/null; then
-        log_info "curl failed, trying wget..."
-        rm -f "$tmp_file"
-        if wget -q --timeout=180 --tries=3 -O "$tmp_file" "$url" 2>/dev/null; then
+    elif [ -n "$PAQET_MIRROR" ]; then
+        log_info "Using mirror for download: $PAQET_MIRROR"
+        if curl -sL --max-time 180 --retry 3 --retry-delay 5 --fail -o "$tmp_file" "$PAQET_MIRROR" 2>/dev/null || \
+           wget -q --timeout=180 --tries=3 -O "$tmp_file" "$PAQET_MIRROR" 2>/dev/null; then
             download_ok=true
+        fi
+    fi
+
+    if [ "$download_ok" = "false" ]; then
+        log_info "Downloading paqet ${version} for ${os_name}/${arch}..."
+        # Try curl first, fallback to wget
+        if curl -sL --max-time 180 --retry 3 --retry-delay 5 --fail -o "$tmp_file" "$url" 2>/dev/null; then
+            download_ok=true
+        elif command -v wget &>/dev/null; then
+            log_info "curl failed, trying wget..."
+            if wget -q --timeout=180 --tries=3 -O "$tmp_file" "$url" 2>/dev/null; then
+                download_ok=true
+            fi
         fi
     fi
 
     if [ "$download_ok" != "true" ]; then
         log_error "Failed to download: $url"
-        log_error "Try manual download: wget '$url' and place binary in $INSTALL_DIR/bin/"
+        log_error "Try manual download: wget '$url' and place the archive in $INSTALL_DIR/bin/"
         rm -f "$tmp_file"
         return 1
     fi
@@ -5904,13 +5938,18 @@ install_additional_backend() {
 }
 
 _install_paqet_components() {
-    log_info "Downloading paqet binary..."
     local _paqet_ver
-    _paqet_ver=$(curl -s --max-time 10 "$PAQET_API_URL" 2>/dev/null | grep -o '"tag_name"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | grep -o '"[^"]*"$' | tr -d '"')
-    if [ -z "$_paqet_ver" ] || ! _validate_version_tag "$_paqet_ver"; then
-        _paqet_ver="$PAQET_VERSION_PINNED"
+    local arch; arch=$(detect_arch)
+    if [ -f "$INSTALL_DIR/bin/paqet" ] || ls "$INSTALL_DIR/bin"/paqet-linux-${arch}-*.tar.gz &>/dev/null; then
+        _paqet_ver="local"
+    else
+        log_info "Downloading paqet binary..."
+        _paqet_ver=$(curl -s --max-time 10 "$PAQET_API_URL" 2>/dev/null | grep -o '"tag_name"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | grep -o '"[^"]*"$' | tr -d '"')
+        if [ -z "$_paqet_ver" ] || ! _validate_version_tag "$_paqet_ver"; then
+            _paqet_ver="$PAQET_VERSION_PINNED"
+        fi
+        log_info "Using paqet ${_paqet_ver}"
     fi
-    log_info "Using paqet ${_paqet_ver}"
     if ! download_paqet "$_paqet_ver"; then
         log_error "Failed to download paqet"
         return 1
@@ -7368,12 +7407,17 @@ main() {
         PAQET_VERSION="$GFK_VERSION_PINNED"
         log_info "Using GFK ${PAQET_VERSION} (pinned for stability)"
     else
-        # Fetch latest version from GitHub, fall back to pinned if API unreachable
-        PAQET_VERSION=$(curl -s --max-time 10 "$PAQET_API_URL" 2>/dev/null | grep -o '"tag_name"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | grep -o '"[^"]*"$' | tr -d '"')
-        if [ -z "$PAQET_VERSION" ] || ! _validate_version_tag "$PAQET_VERSION"; then
-            PAQET_VERSION="$PAQET_VERSION_PINNED"
+        local arch; arch=$(detect_arch)
+        if [ -f "$INSTALL_DIR/bin/paqet" ] || ls "$INSTALL_DIR/bin"/paqet-linux-${arch}-*.tar.gz &>/dev/null; then
+            PAQET_VERSION="local"
+        else
+            # Fetch latest version from GitHub, fall back to pinned if API unreachable
+            PAQET_VERSION=$(curl -s --max-time 10 "$PAQET_API_URL" 2>/dev/null | grep -o '"tag_name"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | grep -o '"[^"]*"$' | tr -d '"')
+            if [ -z "$PAQET_VERSION" ] || ! _validate_version_tag "$PAQET_VERSION"; then
+                PAQET_VERSION="$PAQET_VERSION_PINNED"
+            fi
+            log_info "Installing paqet ${PAQET_VERSION}"
         fi
-        log_info "Installing paqet ${PAQET_VERSION}"
         download_paqet "$PAQET_VERSION"
     fi
     echo ""
