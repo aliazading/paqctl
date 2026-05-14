@@ -421,14 +421,22 @@ download_paqet() {
 
     # Check for local archive first
     local local_archive
-    local_archive=$(find "$INSTALL_DIR/bin" -name "paqet-linux-${arch}-*.tar.gz" | head -1)
+    local_archive=$(find "$INSTALL_DIR/bin" -maxdepth 1 -name "paqet-linux-${arch}-*.tar.gz" 2>/dev/null | head -1)
 
     local download_ok=false
     if [ -n "$local_archive" ] && [ -f "$local_archive" ]; then
         log_info "Found local archive: $local_archive. Using it instead of downloading."
         cp "$local_archive" "$tmp_file"
         download_ok=true
-    else
+    elif [ -n "$PAQET_MIRROR" ]; then
+        log_info "Using mirror for download: $PAQET_MIRROR"
+        if curl -sL --max-time 180 --retry 3 --retry-delay 5 --fail -o "$tmp_file" "$PAQET_MIRROR" 2>/dev/null || \
+           wget -q --timeout=180 --tries=3 -O "$tmp_file" "$PAQET_MIRROR" 2>/dev/null; then
+            download_ok=true
+        fi
+    fi
+
+    if [ "$download_ok" = "false" ]; then
         log_info "Downloading paqet ${version} for ${os_name}/${arch}..."
         # Try curl first, fallback to wget
         if curl -sL --max-time 180 --retry 3 --retry-delay 5 --fail -o "$tmp_file" "$url" 2>/dev/null; then
@@ -2585,14 +2593,22 @@ download_paqet() {
 
     # Check for local archive first
     local local_archive
-    local_archive=$(find "$INSTALL_DIR/bin" -name "paqet-linux-${arch}-*.tar.gz" | head -1)
+    local_archive=$(find "$INSTALL_DIR/bin" -maxdepth 1 -name "paqet-linux-${arch}-*.tar.gz" 2>/dev/null | head -1)
 
     local download_ok=false
     if [ -n "$local_archive" ] && [ -f "$local_archive" ]; then
         log_info "Found local archive: $local_archive. Using it instead of downloading."
         cp "$local_archive" "$tmp_file"
         download_ok=true
-    else
+    elif [ -n "$PAQET_MIRROR" ]; then
+        log_info "Using mirror for download: $PAQET_MIRROR"
+        if curl -sL --max-time 180 --retry 3 --retry-delay 5 --fail -o "$tmp_file" "$PAQET_MIRROR" 2>/dev/null || \
+           wget -q --timeout=180 --tries=3 -O "$tmp_file" "$PAQET_MIRROR" 2>/dev/null; then
+            download_ok=true
+        fi
+    fi
+
+    if [ "$download_ok" = "false" ]; then
         log_info "Downloading paqet ${version} for ${os_name}/${arch}..."
         # Try curl first, fallback to wget
         if curl -sL --max-time 180 --retry 3 --retry-delay 5 --fail -o "$tmp_file" "$url" 2>/dev/null; then
